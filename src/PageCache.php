@@ -42,6 +42,11 @@ class PageCache
     protected $httpHeaders;
 
     /**
+     * @var mixed[]
+     */
+    protected $whitelistHttpCode = [];
+
+    /**
      * @var \PageCache\Storage\CacheItemStorage
      */
     private $itemStorage;
@@ -275,61 +280,74 @@ class PageCache
      */
     private function storePageContent($content)
     {
-        $key = $this->getCurrentKey();
-        $item = new CacheItem($key);
+        $whitelistHttpCode = $this->whitelistHttpCode;
+        $control = true;
 
-        // When enabled we store original header values with the item
-        $isHeadersForwardingEnabled = $this->config->isSendHeaders() && $this->config->isForwardHeaders();
+        if (is_array($whitelistHttpCode) && count($whitelistHttpCode) > 0) {
+            $code = http_response_code();
 
-        $this->log(__METHOD__ . ' Header forwarding is ' . ($isHeadersForwardingEnabled ? 'enabled' : 'disabled'));
-
-        $expiresAt = $isHeadersForwardingEnabled
-            ? $this->httpHeaders->detectResponseExpires()
-            : null;
-
-        $lastModified = $isHeadersForwardingEnabled
-            ? $this->httpHeaders->detectResponseLastModified()
-            : null;
-
-        $eTagString = $isHeadersForwardingEnabled
-            ? $this->httpHeaders->detectResponseETagString()
-            : null;
-
-        // Store original Expires header time if set
-        if (!empty($expiresAt)) {
-            $item->setExpiresAt($expiresAt);
+            if (!in_array($code, $whitelistHttpCode)) {
+                $control = false;
+            }
         }
 
-        // Set current time as last modified if none provided
-        if (empty($lastModified)) {
-            $lastModified = new DateTime();
+        if ($control) {
+            $key = $this->getCurrentKey();
+            $item = new CacheItem($key);
+
+            // When enabled we store original header values with the item
+            $isHeadersForwardingEnabled = $this->config->isSendHeaders() && $this->config->isForwardHeaders();
+
+            $this->log(__METHOD__ . ' Header forwarding is ' . ($isHeadersForwardingEnabled ? 'enabled' : 'disabled'));
+
+            $expiresAt = $isHeadersForwardingEnabled
+                ? $this->httpHeaders->detectResponseExpires()
+                : null;
+
+            $lastModified = $isHeadersForwardingEnabled
+                ? $this->httpHeaders->detectResponseLastModified()
+                : null;
+
+            $eTagString = $isHeadersForwardingEnabled
+                ? $this->httpHeaders->detectResponseETagString()
+                : null;
+
+            // Store original Expires header time if set
+            if (!empty($expiresAt)) {
+                $item->setExpiresAt($expiresAt);
+            }
+
+            // Set current time as last modified if none provided
+            if (empty($lastModified)) {
+                $lastModified = new DateTime();
+            }
+
+            /**
+             * Set ETag from from last modified time if none provided
+             *
+             * @link https://github.com/mmamedov/page-cache/issues/1#issuecomment-273875002
+             */
+            if (empty($eTagString)) {
+                $eTagString = md5($lastModified->getTimestamp());
+            }
+
+            $item
+                ->setContent($content)
+                ->setLastModified($lastModified)
+                ->setETagString($eTagString);
+
+            $this->getItemStorage()->set($item);
+
+            $logHeaders = sprintf(
+                '%s: %s, %s: %s',
+                HttpHeaders::HEADER_LAST_MODIFIED,
+                $item->getLastModified()->format(HttpHeaders::DATE_FORMAT_CREATE),
+                HttpHeaders::HEADER_ETAG,
+                $item->getETagString()
+            );
+
+            $this->log(__METHOD__ . ' Data stored for key ' . $key . '; Headers {' . $logHeaders . '}');
         }
-
-        /**
-         * Set ETag from from last modified time if none provided
-         *
-         * @link https://github.com/mmamedov/page-cache/issues/1#issuecomment-273875002
-         */
-        if (empty($eTagString)) {
-            $eTagString = md5($lastModified->getTimestamp());
-        }
-
-        $item
-            ->setContent($content)
-            ->setLastModified($lastModified)
-            ->setETagString($eTagString);
-
-        $this->getItemStorage()->set($item);
-
-        $logHeaders = sprintf(
-            '%s: %s, %s: %s',
-            HttpHeaders::HEADER_LAST_MODIFIED,
-            $item->getLastModified()->format(HttpHeaders::DATE_FORMAT_CREATE),
-            HttpHeaders::HEADER_ETAG,
-            $item->getETagString()
-        );
-
-        $this->log(__METHOD__ . ' Data stored for key ' . $key . '; Headers {' . $logHeaders . '}');
 
         // Return page content
         return $content;

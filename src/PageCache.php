@@ -532,4 +532,20 @@ class PageCache
     {
         return $this->config;
     }
+
+    /**
+     * @return mixed[]
+     */
+    public function getWhitelistHttpCode()
+    {
+        return $this->whitelistHttpCode;
+    }
+
+    /**
+     * @param mixed[] $whitelistHttpCode
+     */
+    public function setWhitelistHttpCode($whitelistHttpCode)
+    {
+        $this->whitelistHttpCode = $whitelistHttpCode;
+    }
 }
